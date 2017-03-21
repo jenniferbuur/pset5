@@ -1,5 +1,5 @@
 //
-//  ViewController.swift
+//  SecondViewController.swift
 //  jenniferbuur_pset5
 //
 //  Created by Jennifer Buur on 16-03-17.
@@ -9,26 +9,25 @@
 import UIKit
 import SQLite
 
-class ViewController: UITableViewController {
+class SecondViewController: UITableViewController {
     
-    var secondViewController: SecondViewController? = nil
-    var lists = [String]()
+    var listName = String()
+    var todos = [String]()
+    var clears = [Int]()
     var row = Int()
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        let addButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addNewList(_:)))
+        let addButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addNewTodo(_:)))
         self.navigationItem.rightBarButtonItem = addButton
+        
         setUpDatabase()
         createTable()
-        self.searchAll()
+        searchAll()
         self.tableView.reloadData()
     }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-    }
+
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         // Dispose of any resources that can be recreated.
@@ -36,8 +35,10 @@ class ViewController: UITableViewController {
     
     // MARK: create database and table
     private var db: Connection?
-    let list = Table("list")
+    let todoList = Table("todoList")
     let listNames = Expression<String>("listNames")
+    let todoNames = Expression<String>("todoNames")
+    let cleared = Expression<Int>("cleared")
     
     // making database
     private func setUpDatabase() {
@@ -53,12 +54,32 @@ class ViewController: UITableViewController {
     // making table
     private func createTable() {
         do {
-            try db!.run(list.create(ifNotExists: true) { t in
-                t.column(listNames, unique: true)
+            try db!.run(todoList.create(ifNotExists: true) { t in
+                t.column(listNames)
+                t.column(todoNames)
+                t.column(cleared)
             })
         } catch {
             alertUser(title: "Oops", message: "Failed to create table")
             print("Failed to create table: \(error)")
+        }
+    }
+    
+    // MARK: to search database for todos
+    func searchAll() {
+        todos.removeAll()
+        clears.removeAll()
+        do {
+            for todo in try db!.prepare(todoList) {
+                if todo[todoNames].isEmpty != true {
+                    if todo[listNames] == listName {
+                        todos.append(todo[todoNames])
+                        clears.append(todo[cleared])
+                    }
+                }
+            }
+        } catch {
+            print("Did not find anything: \(error)")
         }
     }
     
@@ -72,27 +93,13 @@ class ViewController: UITableViewController {
         return
     }
     
-    // MARK: to search database for todos
-    func searchAll() {
-        lists.removeAll()
-        do {
-            for name in try db!.prepare(list) {
-                if name[listNames].isEmpty != true {
-                    lists.append(name[listNames])
-                }
-            }
-        } catch {
-            print("Did not find anything: \(error)")
-        }
-    }
-
-    func addNewList(_ sender: Any) {
+    func addNewTodo(_ sender: Any) {
         
         // http://stackoverflow.com/questions/26567413/get-input-value-from-textfield-in-ios-alert-in-swift
-        let alert = UIAlertController(title: "Add a new list", message: "Enter the name of your new list", preferredStyle: .alert)
+        let alert = UIAlertController(title: "Add a new todo", message: "Enter the name of your new todo", preferredStyle: .alert)
         
         alert.addTextField { (textField) in
-            textField.placeholder = "Listname"
+            textField.placeholder = "Todoname"
         }
         
         alert.addAction(UIAlertAction(title: "OK", style: .default, handler: { [weak alert] (_) in
@@ -102,24 +109,40 @@ class ViewController: UITableViewController {
             if textField?.text! == "" {
                 print("Empty String")
             } else {
-                let insert = self.list.insert(self.listNames <- (textField?.text!)!)
+                let insert = self.todoList.insert(self.listNames <- self.listName, self.todoNames <- (textField?.text!)!, self.cleared <- 0)
                 do {
                     try self.db!.run(insert)
                 } catch {
-                    self.alertUser(title: "Oops", message: "Could not create new list")
-                    print("Error creating list: \(error)")
+                    self.alertUser(title: "Oops", message: "Could not create new todo")
+                    print("Error creating todo: \(error)")
                 }
                 self.searchAll()
                 self.tableView.reloadData()
             }
+            
         }))
+        
         self.present(alert, animated: true, completion: nil)
     }
+    
+    @IBAction func todoCleared(_ sender: UISwitch) {
+        let row = sender.tag
+        let clear = todoList.filter(todoNames == todos[row] &&
+        listNames == listName)
+        let update = clear.update(cleared <- 1)
+        do {
+            try db!.run(update)
+        } catch {
+            print("Error updating todo: \(error)")
+        }
+        searchAll()
+    }
+    
     
     //MARK: tableviewdatasource
     // making tableview
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return lists.count
+        return todos.count
     }
     
     override func numberOfSections(in tableView: UITableView) -> Int {
@@ -128,9 +151,12 @@ class ViewController: UITableViewController {
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
-        let newCell = tableView.dequeueReusableCell(withIdentifier: "firstCell") as! firstCustomCell
+        let newCell = tableView.dequeueReusableCell(withIdentifier: "secondCell") as! secondCustomCell
         
-        newCell.listName.text = lists[indexPath.row]
+        newCell.todoName.text = todos[indexPath.row]
+        if clears[indexPath.row] == 1 {
+            newCell.doneSwitch.setOn(true, animated: true)
+        }
         
         return newCell
     }
@@ -142,12 +168,12 @@ class ViewController: UITableViewController {
     
     override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCellEditingStyle, forRowAt indexPath: IndexPath) {
         if (editingStyle == UITableViewCellEditingStyle.delete) {
-            let item = list.filter(listNames == lists[indexPath.row])
+            let item = todoList.filter(todoNames == todos[indexPath.row])
             do {
                 try db!.run(item.delete())
                 searchAll()
             } catch {
-                print("Could not delete list: \(error)")
+                print("Could not delete todo: \(error)")
             }
             tableView.deleteRows(at: [indexPath], with: .automatic)
         }
@@ -155,11 +181,5 @@ class ViewController: UITableViewController {
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         row = indexPath.row
-    }
-    
-    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        let navigationController = segue.destination as! UINavigationController
-        let secondViewController = navigationController.viewControllers.first! as! SecondViewController
-        secondViewController.listName = self.lists[tableView.indexPathForSelectedRow!.row]
     }
 }
